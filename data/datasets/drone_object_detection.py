@@ -261,71 +261,7 @@ class DroneObjectDetectionDataset(Dataset):
             self.annotations.append({"bboxes": bboxes})
 
     def _load_custom_annotations(self):
-        """
-        [Placeholder for Custom Annotation Loading Logic]
-        Implement your own logic to load annotations from your custom format.
-        This could involve reading CSV, XML, or any other format.
-
-        Example (Illustrative - Replace with your actual logic):
-        Assume a CSV file where each row is: image_filename, x_min, y_min, x_max, y_max, class_name
-        """
-        try:
-            with open(self.annotation_file, "r") as f:
-                # Example CSV parsing (replace with your format parsing)
-                lines = f.readlines()[1:]  # Skip header if exists
-                for line in lines:
-                    parts = line.strip().split(",")
-                    if len(parts) != 6:
-                        logging.warning(
-                            f"Invalid custom annotation line: {line}. Skipping."
-                        )
-                        continue
-                    image_filename, x_min, y_min, x_max, y_max, class_name = parts
-
-                    image_path = os.path.join(self.data_root, image_filename)
-                    if not os.path.exists(image_path):
-                        logging.warning(
-                            f"Image file not found: {image_path}. Skipping annotation."
-                        )
-                        continue
-
-                    if class_name not in self._class_to_index:
-                        if (
-                            self.classes is None
-                        ):  # Dynamically add new classes if not predefined
-                            class_index = len(self._class_to_index)
-                            self._class_to_index[class_name] = class_index
-                            self._index_to_class[class_index] = class_name
-                        else:
-                            logging.warning(
-                                f"Class '{class_name}' not in predefined classes. Skipping annotation."
-                            )
-                            continue
-                    else:
-                        class_index = self._class_to_index[class_name]
-
-                    bbox = [
-                        float(x_min),
-                        float(y_min),
-                        float(x_max),
-                        float(y_max),
-                        int(class_index),
-                    ]
-
-                    # Find if image_path is already in self.image_paths, if so, append bbox to existing annotation
-                    try:
-                        image_index = self.image_paths.index(image_path)
-                        self.annotations[image_index]["bboxes"].append(bbox)
-                    except ValueError:  # Image path not found yet
-                        self.image_paths.append(image_path)
-                        self.annotations.append({"bboxes": [bbox]})
-
-        except FileNotFoundError:
-            logging.error(f"Custom annotation file not found: {self.annotation_file}")
-            raise
-        except Exception as e:
-            logging.error(f"Error loading custom annotations: {e}")
-            raise
+        pass  # to be implemented
 
     def __len__(self):
         return len(self.image_paths)
