@@ -8,6 +8,10 @@ import logging
 from typing import List, Callable, Optional, Dict, Any, Tuple
 from collections import defaultdict
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 
 class DroneObjectDetectionDataset(Dataset):
     """
@@ -20,17 +24,15 @@ class DroneObjectDetectionDataset(Dataset):
         self,
         data_root: str,
         annotation_file: str,
-        image_size: Tuple[int, int] = (640, 640),  # Target image size (height, width)
+        image_size: Tuple[int, int] = (640, 640),
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
-        annotation_format: str = "json_coco",  # Supported formats: 'json_coco', 'txt_yolo', 'custom_format'
-        classes: Optional[
-            List[str]
-        ] = None,  # List of class names, if None, inferred from annotations
-        use_cache: bool = False,  # Enable caching for faster loading (RAM or disk based)
-        cache_backend: str = "ram",  # 'ram' or 'disk'
-        cache_dir: str = ".dataset_cache",  # Directory for disk cache
-    ):
+        annotation_format: str = "json_coco",
+        classes: Optional[List[str]] = None,
+        use_cache: bool = False,
+        cache_backend: str = "ram",
+        cache_dir: str = ".dataset_cache",
+    ) -> None:
         """
         Args:
             data_root (str): Root directory of the dataset (images and annotations).
@@ -39,11 +41,36 @@ class DroneObjectDetectionDataset(Dataset):
             transform (Callable, optional): Image transformations. Defaults to None.
             target_transform (Callable, optional): Target (annotation) transformations. Defaults to None.
             annotation_format (str): Format of the annotation file ('json_coco', 'txt_yolo', 'custom_format').
-            classes (List[str], optional): List of class names. If None, inferred from annotations.
+            classes (List[str], optional): List of class names. If None, inferred from annotations (COCO only). Required for YOLO and custom formats.
             use_cache (bool): Whether to use caching for faster data loading.
             cache_backend (str): Backend for caching ('ram' or 'disk').
             cache_dir (str): Directory to store disk cache.
+
+        Raises:
+            ValueError: If annotation format is unsupported, or if classes are not provided for YOLO format,
+                        or if specified classes are not found in COCO annotations.
+            FileNotFoundError: If annotation file or image files are not found.
+            json.JSONDecodeError: If COCO annotation file is not valid JSON.
         """
+        # Input validation and assertions
+        assert os.path.isdir(data_root), f"Data root directory not found: {data_root}"
+        assert os.path.isfile(
+            annotation_file
+        ), f"Annotation file not found: {annotation_file}"
+        assert annotation_format.lower() in [
+            "json_coco",
+            "txt_yolo",
+            "custom_format",
+        ], f"Unsupported annotation format: {annotation_format}"
+        assert cache_backend.lower() in [
+            "ram",
+            "disk",
+        ], f"Unsupported cache backend: {cache_backend}"
+        if annotation_format.lower() == "txt_yolo" and classes is None:
+            raise ValueError(
+                "Classes must be provided when using YOLO annotation format."
+            )
+
         self.data_root = data_root
         self.annotation_file = annotation_file
         self.image_size = image_size
@@ -56,20 +83,16 @@ class DroneObjectDetectionDataset(Dataset):
         self.cache_dir = cache_dir
 
         self.image_paths: List[str] = []
-        self.annotations: List[Dict[str, Any]] = (
-            []
-        )  # Store annotations in a consistent format
+        self.annotations: List[Dict[str, Any]] = []
         self._class_to_index: Dict[str, int] = {}
         self._index_to_class: Dict[int, str] = {}
-        self._cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = (
-            {}
-        )  # Cache for loaded data
+        self._cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
 
-        self._load_annotations()  # Load annotations based on format
-        if self.classes is None:
-            self.classes = list(
-                self._class_to_index.keys()
-            )  # Infer classes if not provided
+        self._load_annotations()
+        if self.classes is None and self.annotation_format == "json_coco":
+            self.classes = list(self._class_to_index.keys())
+        elif self.classes is None:
+            self.classes = []  # Initialize as empty list if not provided and not COCO
 
         if self.use_cache and self.cache_backend == "disk":
             os.makedirs(self.cache_dir, exist_ok=True)
@@ -78,20 +101,20 @@ class DroneObjectDetectionDataset(Dataset):
             f"Dataset initialized with {len(self.image_paths)} images, {len(self.classes)} classes, annotation format: {self.annotation_format}, cache: {self.use_cache} ({self.cache_backend})."
         )
 
-    def _load_annotations(self):
+    def _load_annotations(self) -> None:
         """Loads annotations based on the specified format."""
         if self.annotation_format == "json_coco":
             self._load_coco_annotations()
         elif self.annotation_format == "txt_yolo":
             self._load_yolo_annotations()
         elif self.annotation_format == "custom_format":
-            self._load_custom_annotations()  # Implement your custom loading logic
+            self._load_custom_annotations()
         else:
             raise ValueError(
-                f"Unsupported annotation format: {self.annotation_format}. Supported formats are: 'json_coco', 'txt_yolo', 'custom_format'."
+                f"Unsupported annotation format: {self.annotation_format}. This should not happen due to constructor validation."
             )
 
-    def _load_coco_annotations(self):
+    def _load_coco_annotations(self) -> None:
         """Loads annotations from COCO JSON format."""
         try:
             with open(self.annotation_file, "r") as f:
@@ -103,16 +126,14 @@ class DroneObjectDetectionDataset(Dataset):
             }
             category_id_to_name = {cat["id"]: cat["name"] for cat in categories}
 
-            if (
-                self.classes is None
-            ):  # Infer classes from COCO categories if not provided
+            if self.classes is None:
                 self._class_to_index = {
                     cat["name"]: i for i, cat in enumerate(categories)
                 }
                 self._index_to_class = {
                     i: cat["name"] for i, cat in enumerate(categories)
                 }
-            else:  # Validate provided classes against COCO categories
+            else:
                 coco_category_names = set(cat["name"] for cat in categories)
                 for cls_name in self.classes:
                     if cls_name not in coco_category_names:
@@ -122,11 +143,9 @@ class DroneObjectDetectionDataset(Dataset):
                 self._class_to_index = {name: i for i, name in enumerate(self.classes)}
                 self._index_to_class = {i: name for i, name in enumerate(self.classes)}
 
-            annotation_map = defaultdict(list)  # Group annotations by image ID
+            annotation_map = defaultdict(list)
             for ann in coco_data["annotations"]:
-                if (
-                    category_id_to_name[ann["category_id"]] in self._class_to_index
-                ):  # Only include annotations for specified classes
+                if category_id_to_name[ann["category_id"]] in self._class_to_index:
                     annotation_map[ann["image_id"]].append(ann)
 
             for image_id, image_filename in image_id_to_filename.items():
@@ -135,11 +154,9 @@ class DroneObjectDetectionDataset(Dataset):
                     logging.warning(f"Image file not found: {image_path}. Skipping.")
                     continue
 
-                bboxes = []
+                bboxes: List[List[float]] = []
                 for ann in annotation_map[image_id]:
-                    bbox_coco = ann[
-                        "bbox"
-                    ]  # [x_min, y_min, width, height] (COCO format)
+                    bbox_coco = ann["bbox"]
                     x_min, y_min, width, height = bbox_coco
                     x_max = x_min + width
                     y_max = y_min + height
@@ -153,33 +170,28 @@ class DroneObjectDetectionDataset(Dataset):
                             float(y_max),
                             int(class_index),
                         ]
-                    )  # [x_min, y_min, x_max, y_max, class_index]
+                    )
 
                 self.image_paths.append(image_path)
-                self.annotations.append({"bboxes": bboxes})  # Store bounding boxes
+                self.annotations.append({"bboxes": bboxes})
 
-        except FileNotFoundError:
-            logging.error(f"Annotation file not found: {self.annotation_file}")
+        except FileNotFoundError as e:
+            logging.error(f"COCO Annotation file not found: {e}")
             raise
-        except json.JSONDecodeError:
-            logging.error(
-                f"Invalid JSON format in annotation file: {self.annotation_file}"
-            )
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON format in COCO annotation file: {e}")
             raise
         except KeyError as e:
             logging.error(
-                f"KeyError in COCO annotation parsing: {e}. Check annotation file structure."
+                f"KeyError in COCO annotation parsing: {e}. Check annotation file structure. Error: {e}"
             )
             raise
         except Exception as e:
-            logging.error(f"Error loading COCO annotations: {e}")
+            logging.error(f"Unexpected error loading COCO annotations: {e}")
             raise
 
-    def _load_yolo_annotations(self):
-        """Loads annotations from YOLO TXT format (one .txt file per image)."""
-        # Assuming YOLO format: one .txt file per image, same name as image but .txt extension
-        # Each line in .txt: <class_id> <x_center> <y_center> <width> <height> (normalized)
-
+    def _load_yolo_annotations(self) -> None:
+        """Loads annotations from YOLO TXT format."""
         image_files = [
             f
             for f in os.listdir(self.data_root)
@@ -190,10 +202,9 @@ class DroneObjectDetectionDataset(Dataset):
                 f"No image files found in data_root: {self.data_root}"
             )
 
-        if self.classes is None:
-            raise ValueError(
-                "Classes must be provided when using YOLO annotation format as class names are not inherently in YOLO format."
-            )
+        assert (
+            self.classes is not None
+        ), "Classes must be provided for YOLO annotation format."
         self._class_to_index = {name: i for i, name in enumerate(self.classes)}
         self._index_to_class = {i: name for i, name in enumerate(self.classes)}
 
@@ -209,7 +220,7 @@ class DroneObjectDetectionDataset(Dataset):
                 )
                 continue
 
-            bboxes = []
+            bboxes: List[List[float]] = []
             try:
                 with open(annotation_txt_path, "r") as f:
                     for line in f:
@@ -223,7 +234,7 @@ class DroneObjectDetectionDataset(Dataset):
                             class_id, x_center, y_center, width, height = map(
                                 float, parts
                             )
-                            class_id = int(class_id)  # YOLO class IDs are integers
+                            class_id = int(class_id)
                         except ValueError:
                             logging.warning(
                                 f"Invalid numeric value in YOLO annotation line: {line}. Skipping line."
@@ -236,47 +247,35 @@ class DroneObjectDetectionDataset(Dataset):
                             )
                             continue
 
-                        # Convert YOLO normalized center/size to x_min, y_min, x_max, y_max (absolute pixel coordinates will be done later)
                         x_min = x_center - width / 2.0
                         y_min = y_center - height / 2.0
                         x_max = x_center + width / 2.0
                         y_max = y_center + height / 2.0
 
-                        bboxes.append(
-                            [x_min, y_min, x_max, y_max, class_id]
-                        )  # [x_min, y_min, x_max, y_max, class_index]
+                        bboxes.append([x_min, y_min, x_max, y_max, class_id])
 
-            except FileNotFoundError:  # Should be already checked, but for robustness
-                logging.error(
-                    f"Annotation file not found (unexpected): {annotation_txt_path}"
-                )
-                continue  # Skip to next image
+            except FileNotFoundError as e:
+                logging.error(f"YOLO Annotation file not found (unexpected): {e}")
+                continue
             except Exception as e:
                 logging.error(
                     f"Error loading YOLO annotations from {annotation_txt_path}: {e}"
                 )
-                continue  # Skip to next image
+                continue
 
             self.image_paths.append(image_path)
             self.annotations.append({"bboxes": bboxes})
 
-    def _load_custom_annotations(self):
-        pass  # to be implemented
+    def _load_custom_annotations(self) -> None:
+        # ... to be implemented ...
+        raise NotImplementedError("Custom annotation format not yet implemented.")
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Returns the number of images in the dataset."""
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """
-        Fetches an image and its annotations.
-
-        Returns:
-            Tuple[torch.Tensor, Dict[str, torch.Tensor]]: (image, target_dict)
-                - image: Transformed image tensor (C, H, W).
-                - target_dict: Dictionary containing target information:
-                    - 'boxes': Bounding box tensor (N, 4) in normalized [x_min, y_min, x_max, y_max] format.
-                    - 'labels': Class label tensor (N,) (integer indices).
-        """
+        """Fetches an image and its annotations at the given index."""
         if self.use_cache and idx in self._cache:
             if self.cache_backend == "ram":
                 return self._cache[idx]
@@ -287,22 +286,18 @@ class DroneObjectDetectionDataset(Dataset):
 
         image_path = self.image_paths[idx]
         annotation = self.annotations[idx]
-        bboxes_list = annotation[
-            "bboxes"
-        ]  # List of [x_min, y_min, x_max, y_max, class_index]
+        bboxes_list = annotation["bboxes"]
 
         try:
-            image = Image.open(image_path).convert("RGB")  # Ensure RGB for consistency
-        except FileNotFoundError:
+            image = Image.open(image_path).convert("RGB")
+        except FileNotFoundError as e:
             logging.error(f"Image file not found during __getitem__: {image_path}")
-            # Handle missing image robustly, e.g., return None or raise error, or skip this index (more complex)
-            raise  # For now, raise to stop training if data is critical
+            raise
 
         original_width, original_height = image.size
 
-        # Convert bounding boxes to normalized coordinates (0 to 1)
-        normalized_bboxes = []
-        labels = []
+        normalized_bboxes: List[List[float]] = []
+        labels: List[int] = []
         for bbox in bboxes_list:
             x_min, y_min, x_max, y_max, class_index = bbox
             normalized_x_min = x_min / original_width
@@ -312,71 +307,41 @@ class DroneObjectDetectionDataset(Dataset):
             normalized_bboxes.append(
                 [normalized_x_min, normalized_y_min, normalized_x_max, normalized_y_max]
             )
-            labels.append(int(class_index))  # Ensure labels are integers
+            labels.append(int(class_index))
 
-        image = transforms.Resize(self.image_size)(image)  # Resize image
+        image = transforms.Resize(self.image_size)(image)
         if self.transform:
-            image, normalized_bboxes = self.transform(
-                image, normalized_bboxes
-            )  # Apply augmentations, passing bboxes
+            image, normalized_bboxes = self.transform(image, normalized_bboxes)
 
-        image = transforms.ToTensor()(image)  # Convert to tensor (after augmentations)
-        image = transforms.Normalize(
+        image_tensor = transforms.ToTensor()(image)
+        image_tensor = transforms.Normalize(
             mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-        )(
-            image
-        )  # ImageNet normalization (common practice)
+        )(image_tensor)
 
         boxes_tensor = (
             torch.tensor(normalized_bboxes, dtype=torch.float32)
             if normalized_bboxes
             else torch.empty(0, 4)
-        )  # (N, 4)
+        )
         labels_tensor = (
             torch.tensor(labels, dtype=torch.int64)
             if labels
             else torch.empty(0, dtype=torch.int64)
-        )  # (N,)
+        )
 
-        target_dict = {
+        target_dict: Dict[str, torch.Tensor] = {
             "boxes": boxes_tensor,
             "labels": labels_tensor,
-            # Add more target information if needed, e.g., 'image_id', 'area', 'iscrowd' (for COCO compatibility)
         }
 
         if self.target_transform:
-            target_dict = self.target_transform(
-                target_dict
-            )  # Apply target transformations if any
+            target_dict = self.target_transform(target_dict)
 
         if self.use_cache:
             if self.cache_backend == "ram":
-                self._cache[idx] = (image, target_dict)
+                self._cache[idx] = (image_tensor, target_dict)
             elif self.cache_backend == "disk":
                 cache_file = os.path.join(self.cache_dir, f"item_{idx}.pt")
-                torch.save((image, target_dict), cache_file)
+                torch.save((image_tensor, target_dict), cache_file)
 
-        return image, target_dict
-
-
-def custom_collate_fn(
-    batch: List[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]
-) -> Tuple[torch.Tensor, List[Dict[str, torch.Tensor]]]:
-    """
-    Custom collate function to handle batches of images and target dictionaries.
-    This is crucial for object detection datasets where images and number of objects can vary.
-
-    Args:
-        batch (List[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]): List of (image, target_dict) tuples.
-
-    Returns:
-        Tuple[torch.Tensor, List[Dict[str, torch.Tensor]]]: (batched_images, batched_target_dicts)
-            - batched_images: Stacked image tensors (B, C, H, W).
-            - batched_target_dicts: List of target dictionaries (length B), no stacking needed for targets.
-    """
-    images = [item[0] for item in batch]
-    targets = [item[1] for item in batch]
-
-    batched_images = torch.stack(images)  # Stack images along the batch dimension
-
-    return batched_images, targets  # Targets are kept as a list of dictionaries
+        return image_tensor, target_dict
