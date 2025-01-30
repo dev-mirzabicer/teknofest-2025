@@ -1,67 +1,11 @@
 name: teknofest-2025
 channels:
-  - pytorch
   - defaults
   - conda-forge
 dependencies:
-  - blas=2.126=openblas
-  - blas-devel=3.9.0=26_osxarm64_openblas
-  - bzip2=1.0.8=h80987f9_6
-  - ca-certificates=2024.12.31=hca03da5_0
-  - cpuonly=2.0=0
-  - filelock=3.13.1=py311hca03da5_0
-  - freetype=2.12.1=h1192e45_0
-  - fsspec=2024.12.0=py311hca03da5_0
-  - gmp=6.2.1=hc377ac9_3
-  - gmpy2=2.1.2=py311h40f64dc_0
-  - jinja2=3.1.5=py311hca03da5_0
-  - jpeg=9e=h80987f9_3
-  - lcms2=2.16=he93ba84_0
-  - lerc=4.0.0=h313beb8_0
-  - libabseil=20240116.2=cxx17_h313beb8_0
-  - libblas=3.9.0=26_osxarm64_openblas
-  - libcblas=3.9.0=26_osxarm64_openblas
-  - libcxx=14.0.6=h848a8c0_0
-  - libdeflate=1.22=h80987f9_0
-  - libffi=3.4.4=hca03da5_1
-  - libgfortran=5.0.0=13_2_0_hd922786_3
-  - libgfortran5=13.2.0=hf226fd6_3
-  - liblapack=3.9.0=26_osxarm64_openblas
-  - liblapacke=3.9.0=26_osxarm64_openblas
-  - libopenblas=0.3.28=openmp_hf332438_1
-  - libpng=1.6.39=h80987f9_0
-  - libprotobuf=4.25.3=h514c7bf_0
-  - libtiff=4.5.1=hc9ead59_1
-  - libwebp-base=1.3.2=h80987f9_1
-  - llvm-openmp=19.1.7=hdb05f8b_0
-  - lz4-c=1.9.4=h313beb8_1
-  - markupsafe=2.1.3=py311h80987f9_1
-  - mpc=1.1.0=h8c48613_1
-  - mpfr=4.0.2=h695f6f0_1
-  - mpmath=1.3.0=py311hca03da5_0
-  - ncurses=6.4=h313beb8_0
-  - networkx=3.4.2=py311hca03da5_0
-  - numpy=1.26.4=py311he598dae_0
-  - numpy-base=1.26.4=py311hfbfe69c_0
-  - openblas=0.3.28=openmp_hea878ba_1
-  - openjpeg=2.5.2=h54b8e55_0
-  - openssl=3.0.15=h80987f9_0
-  - pillow=11.0.0=py311h84e58ab_1
-  - pip=24.2=py311hca03da5_0
-  - python=3.11.11=hb885b13_0
-  - pytorch=2.3.1=cpu_py311h353dffe_0
-  - pytorch-mutex=1.0=cpu
-  - readline=8.2=h1a28f6b_0
-  - setuptools=75.1.0=py311hca03da5_0
-  - sleef=3.5.1=h80987f9_2
-  - sqlite=3.45.3=h80987f9_0
-  - sympy=1.13.3=py311hca03da5_0
-  - tk=8.6.14=h6ba3021_0
-  - torchvision=0.18.1=cpu_py311hb6554cd_0
-  - typing_extensions=4.12.2=py311hca03da5_0
-  - tzdata=2025a=h04d1e81_0
-  - wheel=0.44.0=py311hca03da5_0
-  - xz=5.4.6=h80987f9_1
-  - zlib=1.2.13=h18a0788_1
-  - zstd=1.5.6=hfb09047_0
-prefix: /Users/mirzabicer/miniforge3/envs/teknofest-2025
+  - python=3.11
+  - pytorch
+  - torchvision
+  - cpuonly
+  - hydra-core
+  - albumentations
