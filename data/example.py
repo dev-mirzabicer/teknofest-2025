@@ -1,3 +1,4 @@
+import contextlib
 import os
 import json
 import datetime
@@ -8,8 +9,7 @@ import logging
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import albumentations as A
-import cProfile
-import pstats
+import torch.profiler
 
 # Import custom modules from the 'data' directory
 from data.datasets.drone_object_detection import DroneObjectDetectionDataset
@@ -147,34 +147,74 @@ def main(cfg: DictConfig):
     )
 
     # --- Performance Profiling ---
-    profile = cProfile.Profile()
-    profile.enable()
+    profiling_cfg = cfg.profiling.default
+
+    if profiling_cfg.enabled:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        trace_output_path = profiling_cfg.on_trace_ready_output_path.format(
+            timestamp=timestamp
+        )
+        os.makedirs(os.path.dirname(trace_output_path), exist_ok=True)
+
+        def trace_handler(prof):  # Define trace handler function
+            prof.export_chrome_trace(trace_output_path)
+            print(f"Profiling trace saved to: {trace_output_path}")
+
+        schedule_fn = torch.profiler.schedule(
+            wait=profiling_cfg.schedule_wait,
+            warmup=profiling_cfg.schedule_warmup,
+            active=profiling_cfg.schedule_active,
+            repeat=profiling_cfg.schedule_repeat,
+        )
+
+        activities_list = []
+        if "cpu" in profiling_cfg.activities:
+            activities_list.append(torch.profiler.ProfilerActivity.CPU)
+        if "cuda" in profiling_cfg.activities:
+            activities_list.append(torch.profiler.ProfilerActivity.CUDA)
+
+        profiler = torch.profiler.profile(
+            activities=activities_list,
+            schedule=schedule_fn,
+            on_trace_ready=trace_handler,
+            record_shapes=profiling_cfg.record_shapes,
+            profile_memory=profiling_cfg.profile_memory,
+            with_stack=profiling_cfg.with_stack,
+        )
+    else:
+        profiler = None  # No profiler if not enabled
 
     # --- Example Iteration ---
-    for batch_idx, (images, targets) in enumerate(train_dataloader):
-        print(
-            f"Batch {batch_idx+1} - Image batch shape: {images.shape}, Number of targets: {len(targets)}"
-        )
-        if targets:
-            first_image_boxes = targets[0]["boxes"]
-            first_image_labels = targets[0]["labels"]
+    with profiler if profiler else contextlib.nullcontext():
+        for batch_idx, (images, targets) in enumerate(train_dataloader):
             print(
-                f"  First image - Boxes shape: {first_image_boxes.shape}, Labels shape: {first_image_labels.shape}"
+                f"Batch {batch_idx+1} - Image batch shape: {images.shape}, Number of targets: {len(targets)}"
             )
-        else:
-            print("  No targets in this batch.")
+            if targets:
+                first_image_boxes = targets[0]["boxes"]
+                first_image_labels = targets[0]["labels"]
+                print(
+                    f"  First image - Boxes shape: {first_image_boxes.shape}, Labels shape: {first_image_labels.shape}"
+                )
+            else:
+                print("  No targets in this batch.")
 
-        if batch_idx > 9:  # Break after 10 batches
-            break
-
-    profile.disable()
-    stats = pstats.Stats(profile)
-    stats.sort_stats(pstats.SortKey.TIME)  # Sort by time
-    stats.print_stats(20)  # Print top 20 function calls by time
-    print("Profiling finished. See stats above.")
-    # Save stats (robust)
-    curr_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    stats.dump_stats(f"example_dataloader_profiling_stats_{curr_date}.prof")
+            if (
+                profiling_cfg.enabled
+                and batch_idx
+                >= (
+                    profiling_cfg.schedule_wait
+                    + profiling_cfg.schedule_warmup
+                    + profiling_cfg.schedule_active
+                )
+                * profiling_cfg.schedule_repeat
+                - 1
+            ):  # Stop after profiling schedule
+                break
+            elif (
+                not profiling_cfg.enabled and batch_idx > 9
+            ):  # Stop after 10 batches if not profiling (for example run)
+                break
 
     print("DataLoader example finished.")
 

@@ -36,3 +36,16 @@ augmentations:
 	rotate_p: 0.5
 	use_blur: true
 	blur_p: 0.5
+
+profiling:
+  default:
+    enabled: false
+    activities: ['cpu', 'cuda']
+    schedule_wait: 1 # Number of steps to skip before starting profiling
+    schedule_warmup: 1 # Number of warmup steps
+    schedule_active: 3 # Number of profiling steps
+    schedule_repeat: 1 # Number of times to repeat the schedule
+    on_trace_ready_output_path: 'profiling_traces/trace_{timestamp}.json' # Output path for Chrome Trace
+    record_shapes: true # Record tensor shapes
+    profile_memory: true # Profile memory usage
+    with_stack: false # Record stack traces (can add overhead)
