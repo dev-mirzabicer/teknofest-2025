@@ -1,0 +1,38 @@
+# conf/config.yaml
+defaults:
+  - dataset: drone_detection
+  - dataloader: default
+  - augmentations: default
+
+dataset:
+  drone_detection:
+    data_root_dir: "..."
+    annotation_file_path: "annotations.json"
+    annotation_format_type: "json_coco"
+    class_names: ["human", "vehicle"]
+    image_resize_size: [512, 512]
+    use_dataset_cache: true
+    cache_backend_type: "ram"
+    cache_directory: ".drone_dataset_cache"
+
+dataloader:
+  default:
+    batch_size_train: 16
+    batch_size_val: 8
+    num_workers_dataloader: 4
+    shuffle_train: true
+    shuffle_val: false
+    pin_memory: false
+
+augmentations:
+  default:
+    use_brightness_contrast: true
+    brightness_contrast_p: 0.5
+    use_horizontal_flip: true
+    horizontal_flip_p: 0.5
+	use_albumentations: true
+	use_rotate: true
+	rotate_limit: 45
+	rotate_p: 0.5
+	use_blur: true
+	blur_p: 0.5
