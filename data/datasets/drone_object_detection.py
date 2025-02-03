@@ -4,13 +4,12 @@ from torchvision import transforms
 from PIL import Image
 import os
 import json
-import logging
+from utils.logger import get_logger
 from typing import List, Callable, Optional, Dict, Any, Tuple
 from collections import defaultdict
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+# Import the CacheManager from our new module.
+from data.cache_manager import CacheManager
 
 
 class DroneObjectDetectionDataset(Dataset):
@@ -82,11 +81,16 @@ class DroneObjectDetectionDataset(Dataset):
         self.cache_backend = cache_backend.lower()
         self.cache_dir = cache_dir
 
+        # Instantiate CacheManager if caching is enabled.
+        if self.use_cache:
+            self.cache_manager = CacheManager(
+                backend=self.cache_backend, cache_dir=self.cache_dir
+            )
+
         self.image_paths: List[str] = []
         self.annotations: List[Dict[str, Any]] = []
         self._class_to_index: Dict[str, int] = {}
         self._index_to_class: Dict[int, str] = {}
-        self._cache: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
 
         self._load_annotations()
         if self.classes is None and self.annotation_format == "json_coco":
@@ -94,15 +98,14 @@ class DroneObjectDetectionDataset(Dataset):
         elif self.classes is None:
             self.classes = []  # Initialize as empty list if not provided and not COCO
 
-        if self.use_cache and self.cache_backend == "disk":
-            os.makedirs(self.cache_dir, exist_ok=True)
+        self.logger = get_logger(self.__class__.__name__)
 
-        logging.info(
-            f"Dataset initialized with {len(self.image_paths)} images, {len(self.classes)} classes, annotation format: {self.annotation_format}, cache: {self.use_cache} ({self.cache_backend})."
+        self.logger.info(
+            f"Dataset initialized with {len(self.image_paths)} images, {len(self.classes)} classes, "
+            f"annotation format: {self.annotation_format}, cache: {self.use_cache} ({self.cache_backend})."
         )
 
     def _load_annotations(self) -> None:
-        """Loads annotations based on the specified format."""
         if self.annotation_format == "json_coco":
             self._load_coco_annotations()
         elif self.annotation_format == "txt_yolo":
@@ -115,7 +118,6 @@ class DroneObjectDetectionDataset(Dataset):
             )
 
     def _load_coco_annotations(self) -> None:
-        """Loads annotations from COCO JSON format."""
         try:
             with open(self.annotation_file, "r") as f:
                 coco_data = json.load(f)
@@ -151,7 +153,9 @@ class DroneObjectDetectionDataset(Dataset):
             for image_id, image_filename in image_id_to_filename.items():
                 image_path = os.path.join(self.data_root, image_filename)
                 if not os.path.exists(image_path):
-                    logging.warning(f"Image file not found: {image_path}. Skipping.")
+                    self.logger.warning(
+                        f"Image file not found: {image_path}. Skipping."
+                    )
                     continue
 
                 bboxes: List[List[float]] = []
@@ -176,22 +180,21 @@ class DroneObjectDetectionDataset(Dataset):
                 self.annotations.append({"bboxes": bboxes})
 
         except FileNotFoundError as e:
-            logging.error(f"COCO Annotation file not found: {e}")
+            self.logger.error(f"COCO Annotation file not found: {e}")
             raise
         except json.JSONDecodeError as e:
-            logging.error(f"Invalid JSON format in COCO annotation file: {e}")
+            self.logger.error(f"Invalid JSON format in COCO annotation file: {e}")
             raise
         except KeyError as e:
-            logging.error(
+            self.logger.error(
                 f"KeyError in COCO annotation parsing: {e}. Check annotation file structure. Error: {e}"
             )
             raise
         except Exception as e:
-            logging.error(f"Unexpected error loading COCO annotations: {e}")
+            self.logger.error(f"Unexpected error loading COCO annotations: {e}")
             raise
 
     def _load_yolo_annotations(self) -> None:
-        """Loads annotations from YOLO TXT format."""
         image_files = [
             f
             for f in os.listdir(self.data_root)
@@ -215,7 +218,7 @@ class DroneObjectDetectionDataset(Dataset):
             )
 
             if not os.path.exists(annotation_txt_path):
-                logging.warning(
+                self.logger.warning(
                     f"Annotation file not found for image: {image_file}. Skipping."
                 )
                 continue
@@ -226,7 +229,7 @@ class DroneObjectDetectionDataset(Dataset):
                     for line in f:
                         parts = line.strip().split()
                         if len(parts) != 5:
-                            logging.warning(
+                            self.logger.warning(
                                 f"Invalid YOLO annotation line in {annotation_txt_path}: {line}. Skipping line."
                             )
                             continue
@@ -236,29 +239,25 @@ class DroneObjectDetectionDataset(Dataset):
                             )
                             class_id = int(class_id)
                         except ValueError:
-                            logging.warning(
+                            self.logger.warning(
                                 f"Invalid numeric value in YOLO annotation line: {line}. Skipping line."
                             )
                             continue
-
                         if class_id not in self._index_to_class:
-                            logging.warning(
+                            self.logger.warning(
                                 f"YOLO class ID {class_id} not in provided classes. Skipping annotation."
                             )
                             continue
-
                         x_min = x_center - width / 2.0
                         y_min = y_center - height / 2.0
                         x_max = x_center + width / 2.0
                         y_max = y_center + height / 2.0
-
                         bboxes.append([x_min, y_min, x_max, y_max, class_id])
-
             except FileNotFoundError as e:
-                logging.error(f"YOLO Annotation file not found (unexpected): {e}")
+                self.logger.error(f"YOLO Annotation file not found (unexpected): {e}")
                 continue
             except Exception as e:
-                logging.error(
+                self.logger.error(
                     f"Error loading YOLO annotations from {annotation_txt_path}: {e}"
                 )
                 continue
@@ -271,18 +270,14 @@ class DroneObjectDetectionDataset(Dataset):
         raise NotImplementedError("Custom annotation format not yet implemented.")
 
     def __len__(self) -> int:
-        """Returns the number of images in the dataset."""
         return len(self.image_paths)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """Fetches an image and its annotations at the given index."""
-        if self.use_cache and idx in self._cache:
-            if self.cache_backend == "ram":
-                return self._cache[idx]
-            elif self.cache_backend == "disk":
-                cache_file = os.path.join(self.cache_dir, f"item_{idx}.pt")
-                if os.path.exists(cache_file):
-                    return torch.load(cache_file)
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        # First, check if the item is already cached.
+        if self.use_cache and self.cache_manager.is_cached(idx):
+            cached_item = self.cache_manager.load(idx)
+            if cached_item is not None:
+                return cached_item
 
         image_path = self.image_paths[idx]
         annotation = self.annotations[idx]
@@ -291,7 +286,7 @@ class DroneObjectDetectionDataset(Dataset):
         try:
             image = Image.open(image_path).convert("RGB")
         except FileNotFoundError as e:
-            logging.error(f"Image file not found during __getitem__: {image_path}")
+            self.logger.error(f"Image file not found during __getitem__: {image_path}")
             raise
 
         original_width, original_height = image.size
@@ -310,8 +305,13 @@ class DroneObjectDetectionDataset(Dataset):
             labels.append(int(class_index))
 
         image = transforms.Resize(self.image_size)(image)
+        # Apply augmentations (supporting both a single augmentation and a list of augmentations)
         if self.transform:
-            image, normalized_bboxes = self.transform(image, normalized_bboxes)
+            if isinstance(self.transform, list):
+                for aug in self.transform:
+                    image, normalized_bboxes = aug(image, normalized_bboxes)
+            else:
+                image, normalized_bboxes = self.transform(image, normalized_bboxes)
 
         image_tensor = transforms.ToTensor()(image)
         image_tensor = transforms.Normalize(
@@ -337,11 +337,15 @@ class DroneObjectDetectionDataset(Dataset):
         if self.target_transform:
             target_dict = self.target_transform(target_dict)
 
-        if self.use_cache:
-            if self.cache_backend == "ram":
-                self._cache[idx] = (image_tensor, target_dict)
-            elif self.cache_backend == "disk":
-                cache_file = os.path.join(self.cache_dir, f"item_{idx}.pt")
-                torch.save((image_tensor, target_dict), cache_file)
+        batch_item: Dict[str, Any] = {
+            "images": image_tensor,
+            "targets": target_dict,
+            "image_ids": image_path,  # Using image path as ID
+            "original_image_sizes": (original_height, original_width),
+        }
 
-        return image_tensor, target_dict
+        # Save the processed item to cache.
+        if self.use_cache:
+            self.cache_manager.save(idx, batch_item)
+
+        return batch_item

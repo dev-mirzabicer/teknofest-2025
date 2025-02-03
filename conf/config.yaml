@@ -1,51 +1,118 @@
-# conf/config.yaml
-defaults:
-  - dataset: drone_detection
-  - dataloader: default
-  - augmentations: default
+# Global parameters
+seed: 42
+device: "cpu" # Options: "cpu", "cuda"
 
+# Dataset configuration for training and validation
 dataset:
-  drone_detection:
-    data_root_dir: "..."
-    annotation_file_path: "annotations.json"
-    annotation_format_type: "json_coco"
-    class_names: ["human", "vehicle"]
-    image_resize_size: [512, 512]
-    use_dataset_cache: true
-    cache_backend_type: "ram"
-    cache_directory: ".drone_dataset_cache"
+  train:
+    data_root: "/Users/mirzabicer/Projects/teknofest-2025/data/data/train"
+    annotation_file: "/Users/mirzabicer/Projects/teknofest-2025/data/data/train/annotations.json"
+    image_size: [128, 128]
+    annotation_format: "json_coco" # Options: "json_coco", "txt_yolo", "custom_format"
+    classes: ["red_circle", "black_square"]
+    use_cache: false
+    cache_backend: "ram" # Options: "ram", "disk"
+    cache_dir: ".dataset_cache"
+  val:
+    data_root: "/Users/mirzabicer/Projects/teknofest-2025/data/data/train"
+    annotation_file: "/Users/mirzabicer/Projects/teknofest-2025/data/data/train/annotations.json"
+    image_size: [128, 128]
+    annotation_format: "json_coco"
+    classes: ["red_circle", "black_square"]
+    use_cache: false
+    cache_backend: "ram"
+    cache_dir: ".dataset_cache"
+  test:
+    data_root: "/Users/mirzabicer/Projects/teknofest-2025/data/data/test"
+    annotation_file: "/Users/mirzabicer/Projects/teknofest-2025/data/data/test/_annotations.coco.json"
+    image_size: [128, 128]
+    annotation_format: json_coco
+    classes: ["red_circle", "black_square"]
+    use_cache: false
+    cache_backend: ram
+    cache_dir: .dataset_cache
 
+# Dataloader parameters
 dataloader:
-  default:
-    batch_size_train: 16
-    batch_size_val: 8
-    num_workers_dataloader: 4
-    shuffle_train: true
-    shuffle_val: false
-    pin_memory: false
+  batch_size: 16
+  num_workers: 6
+  pin_memory: true
 
-augmentations:
-  default:
-    use_brightness_contrast: true
-    brightness_contrast_p: 0.5
-    use_horizontal_flip: true
-    horizontal_flip_p: 0.5
-	use_albumentations: true
-	use_rotate: true
-	rotate_limit: 45
-	rotate_p: 0.5
-	use_blur: true
-	blur_p: 0.5
+# Model configuration
+model:
+  name: "simple_object_detector"
+  input_channels: 3
+  num_classes: 2
+  grid_size: 7
+  # Optional pretrained settings
+  pretrained_path: "/Users/mirzabicer/Projects/teknofest-2025/outputs/2025-02-03/00-00-46/checkpoints/drone_object_detection_experiment/best_model.pth"
+  pretrained_strict: true
 
-profiling:
-  default:
+# Loss function configuration (choose one: e.g., custom_loss, focal_loss, smooth_l1_loss, or cross_entropy)
+loss:
+  name: detection_loss
+  alpha: 0.25
+  gamma: 2.0
+  cls_loss_weight: 1.0
+  box_loss_weight: 10.0
+  obj_loss_weight: 1.0
+  grid_size: 7
+  num_classes: 2
+  bg_class: 0
+
+# Optimizer configuration
+optimizer:
+  name: "adam"
+  params:
+    lr: 0.001
+    weight_decay: 0.0001
+
+# Learning rate scheduler configuration (optional)
+lr_scheduler:
+  name: "steplr"
+  step_size: 10
+  gamma: 0.1
+
+# Metrics configuration (list of metric dictionaries) for now, one element: name: "iou", objectness_threshold: 0.5
+metrics:
+  - name: "detection_metrics"
+    objectness_threshold: 0.5
+    iou_threshold: 0.5
+    conf_threshold: 0.5
+    nms_iou_threshold: 0.5
+    num_classes: 2
+
+# Trainer configuration
+trainer:
+  name: "drone_object_detection"
+  num_epochs: 10
+  validation_freq_epochs: 1
+  checkpoint_save_freq_epochs: 1
+  experiment_name: "drone_object_detection_experiment"
+  grad_clip_norm: 5.0
+  tensorboard:
+    enabled: true
+    log_dir: "runs"
+  mixed_precision:
     enabled: false
-    activities: ['cpu', 'cuda']
-    schedule_wait: 1 # Number of steps to skip before starting profiling
-    schedule_warmup: 1 # Number of warmup steps
-    schedule_active: 3 # Number of profiling steps
-    schedule_repeat: 1 # Number of times to repeat the schedule
-    on_trace_ready_output_path: 'profiling_traces/trace_{timestamp}.json' # Output path for Chrome Trace
-    record_shapes: true # Record tensor shapes
-    profile_memory: true # Profile memory usage
-    with_stack: false # Record stack traces (can add overhead)
+
+# (Optional) Profiling configuration
+profiling:
+  enabled: false
+  schedule_wait: 1
+  schedule_warmup: 1
+  schedule_active: 1
+  schedule_repeat: 1
+  activities: ["cpu", "cuda"]
+  record_shapes: false
+  profile_memory: false
+  with_stack: false
+  trace_output_path: "profiler/profiler_trace.json"
+
+tensorboard:
+  enabled: true
+  verbose: true
+  log_every_batch: false # Log details for only sampled batches
+  log_batch_sample_freq: 50 # Detailed logging every 50 batches (or first batch per epoch)
+  log_memory: true
+  log_exec_time: true

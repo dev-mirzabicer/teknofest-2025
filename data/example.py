@@ -3,6 +3,7 @@ import os
 import json
 import datetime
 import torch
+from typing import List, Dict, Any
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import logging
@@ -17,19 +18,30 @@ from data.augment.augments import (
     RandomBrightnessContrast,
     RandomHorizontalFlipBoundingBoxes,
 )
-from data.augment.albumentations_augment import AlbumentationsWrapper
+from data.augment.albumentation_augmentation import AlbumentationsWrapper
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
-def custom_collate_fn(batch):
-    """Custom collate function."""
-    images = [item[0] for item in batch]
-    targets = [item[1] for item in batch]
-    batched_images = torch.stack(images)
-    return batched_images, targets
+def custom_collate_fn(
+    batch: List[Dict[str, Any]]
+) -> Dict[str, Any]:  # Collate function now returns a Dict
+    """Custom collate function to handle batches of standardized dictionaries."""
+    images = [item["images"] for item in batch]
+    targets = [item["targets"] for item in batch]
+    image_ids = [item["image_ids"] for item in batch]
+    original_image_sizes = [item["original_image_sizes"] for item in batch]
+
+    batched_images = torch.stack(images)  # Stack images
+
+    return {
+        "images": batched_images,
+        "targets": targets,  # Targets remain as a list of dictionaries
+        "image_ids": image_ids,
+        "original_image_sizes": original_image_sizes,
+    }
 
 
 @hydra.main(config_path="../conf", config_name="config")
