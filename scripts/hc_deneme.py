@@ -1,19 +1,9 @@
-#!/usr/bin/env python3
-"""
-debug_script.py
-
-A debugging script to extensively test and log object detection model behavior.
-Loads a pre-trained model, evaluates it on the validation dataset, and logs
-detailed information about outputs, targets, losses, and metrics.
-"""
-
 import os
 import torch
 from torch.utils.data import DataLoader
 from PIL import ImageDraw
 import torchvision.transforms.functional as TF
 
-# Import your custom modules
 from utils.logger import get_logger
 from utils.collate_fn import detection_collate_fn
 from models.model_factory import create_model
@@ -28,10 +18,10 @@ ANNOTATION_FILE_VAL = (
 )
 IMAGE_SIZE = (128, 128)
 BATCH_SIZE = 8
-NUM_WORKERS = 0  # Keep it 0 for debugging, increase if needed
+NUM_WORKERS = 0
 PIN_MEMORY = False
 MODEL_NAME = "simple_object_detector"
-NUM_CLASSES = 2  # Assuming 12 classes from your config
+NUM_CLASSES = 2
 GRID_SIZE = 7
 PRETRAINED_PATH = "/Users/mirzabicer/Projects/teknofest-2025/outputs/2025-02-02/22-41-52/checkpoints/drone_object_detection_experiment/best_model.pth"
 LOSS_NAME = "detection_loss"
@@ -54,7 +44,7 @@ val_dataset = DroneObjectDetectionDataset(
     classes=[
         "red_circle",
         "black_square",
-    ],  # Ensure classes match your training setup
+    ],
     use_cache=False,
     cache_backend="ram",
     cache_dir=".dataset_cache",
@@ -112,8 +102,8 @@ metrics_config = [
     }
 ]
 metrics = create_metrics_list(metrics_config)
-metric = metrics[0]  # Assuming only one metric for now
-metric.reset()  # Reset metric at the start
+metric = metrics[0]
+metric.reset()
 
 # --- Debugging Loop ---
 total_val_loss = 0.0

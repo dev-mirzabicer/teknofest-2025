@@ -185,16 +185,27 @@ class DroneObjectDetectionTrainer(BaseTrainer):
         - Red boxes for predicted boxes above a given confidence threshold (with "Pred: class_id, conf")
 
         Args:
-        self: Typically 'self' is your trainer instance (so we can access self.tb_logger, etc.).
+        self: Trainer
         batch (dict): Contains "images" (B,C,H,W) and "targets" (list of dicts with "boxes" and "labels").
         model_output (dict): Contains "bbox_preds" (B,G,G,4), "objectness" (B,G,G,1), and "logits" (B,G,G,num_classes).
         batch_idx (int): Used to label the images in TensorBoard.
         score_threshold (float): Minimum confidence score to visualize a predicted box.
         max_images (int): How many images from the batch to visualize (starting from index 0).
         """
+        logger = get_logger(self.__class__.__name__)  # Get logger instance
+
         images = batch["images"]  # shape: (B, C, H, W)
         targets = batch["targets"]  # list of length B
         bbox_preds = model_output["bbox_preds"]  # shape: (B, G, G, 4)
+
+        logger.info(
+            f"visualize_predictions called for batch_idx: {batch_idx}"
+        )  # Log call to visualize_predictions
+        logger.debug(f"  bbox_preds shape: {bbox_preds.shape}")  # Log bbox_preds shape
+        logger.debug(
+            f"  Ground truth targets (first in batch): {targets[0]['boxes'] if targets else 'No targets'}"
+        )  # Log GT boxes
+
         objectness = model_output["objectness"]  # shape: (B, G, G, 1)
         logits = model_output["logits"]  # shape: (B, G, G, num_classes)
 
@@ -202,11 +213,11 @@ class DroneObjectDetectionTrainer(BaseTrainer):
         G = bbox_preds.shape[1]
         device = images.device
 
-        # Prepare a grid for decoding
+        # Prepare grid top-left corners instead of centers
         cell_size = 1.0 / G
-        xs = (torch.arange(G, device=device).float() + 0.5) * cell_size
-        ys = (torch.arange(G, device=device).float() + 0.5) * cell_size
-        grid_x, grid_y = torch.meshgrid(xs, ys, indexing="ij")  # (G, G)
+        xs = (torch.arange(G, device=device).float()) * cell_size  # removed + 0.5
+        ys = (torch.arange(G, device=device).float()) * cell_size  # removed + 0.5
+        grid_x, grid_y = torch.meshgrid(xs, ys, indexing="xy")  # (G, G)
         # Reshape to (1, G, G, 1)
         grid_x = grid_x.unsqueeze(0).unsqueeze(-1)  # (1, G, G, 1)
         grid_y = grid_y.unsqueeze(0).unsqueeze(-1)  # (1, G, G, 1)
@@ -225,8 +236,27 @@ class DroneObjectDetectionTrainer(BaseTrainer):
         tw = bbox_preds[..., 2:3]
         th = bbox_preds[..., 3:4]
 
-        pred_center_x = grid_x + tx * cell_size  # (B, G, G, 1)
-        pred_center_y = grid_y + ty * cell_size
+        logger.debug(
+            f"  grid_x shape: {grid_x.shape}, sample (first cell): {grid_x[0,0,0,0]:.4f}"
+        )  # Log grid_x
+        logger.debug(
+            f"  grid_y shape: {grid_y.shape}, sample (first cell): {grid_y[0,0,0,0]:.4f}"
+        )  # Log grid_y
+        logger.debug(
+            f"  tx shape: {tx.shape}, sample (first cell): {tx[0,0,0,0]:.4f}"
+        )  # Log tx
+        logger.debug(
+            f"  ty shape: {ty.shape}, sample (first cell): {ty[0,0,0,0]:.4f}"
+        )  # Log ty
+        logger.debug(
+            f"  tw shape: {tw.shape}, sample (first cell): {tw[0,0,0,0]:.4f}"
+        )  # Log tw
+        logger.debug(
+            f"  th shape: {th.shape}, sample (first cell): {th.shape}"
+        )  # Log th
+
+        pred_center_x = grid_x + tx * cell_size  # using top-left grid_x
+        pred_center_y = grid_y + ty * cell_size  # using top-left grid_y
         # tw, th are presumably in "absolute" scale wrt the grid cell => tw / G for normalized
         pred_w = tw / G
         pred_h = th / G
@@ -242,6 +272,17 @@ class DroneObjectDetectionTrainer(BaseTrainer):
         x_max = torch.clamp(x_max, 0.0, 1.0)
         y_max = torch.clamp(y_max, 0.0, 1.0)
 
+        # Log decoded box coordinates for the first grid cell of the first image
+        logger.debug(
+            f"  Decoded pred_center_x, pred_center_y (first cell): ({pred_center_x[0,0,0,0].item():.4f}, {pred_center_y[0,0,0,0].item():.4f})"
+        )
+        logger.debug(
+            f"  Decoded pred_w, pred_h (first cell): ({pred_w[0,0,0,0].item():.4f}, {pred_h[0,0,0,0].item():.4f})"
+        )
+        logger.debug(
+            f"  Decoded x_min, y_min, x_max, y_max (first cell): ({x_min[0,0,0,0].item():.4f}, {y_min[0,0,0,0].item():.4f}, {x_max[0,0,0,0].item():.4f}, {y_max[0,0,0,0].item():.4f})"
+        )
+
         # For each image we do:
         for i in range(min(B, max_images)):
             # Convert tensor image to PIL
@@ -252,6 +293,15 @@ class DroneObjectDetectionTrainer(BaseTrainer):
             # 1) Draw Ground-Truth boxes (in green)
             gt_boxes = targets[i]["boxes"]  # shape: (N, 4) (normalized)
             gt_labels = targets[i]["labels"]  # shape: (N,)
+
+            if i == 0 and gt_boxes.numel() > 0:
+                logger.debug(
+                    f"  First image GT boxes: {gt_boxes}"
+                )  # Log GT boxes for first image
+                logger.debug(
+                    f"  First image GT labels: {gt_labels}"
+                )  # Log GT labels for first image
+
             for box_i in range(gt_boxes.shape[0]):
                 box = gt_boxes[box_i]
                 label = gt_labels[box_i].item()

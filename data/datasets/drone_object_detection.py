@@ -283,6 +283,10 @@ class DroneObjectDetectionDataset(Dataset):
         annotation = self.annotations[idx]
         bboxes_list = annotation["bboxes"]
 
+        self.logger.debug(
+            f"  Raw bboxes from annotation (index {idx}): {bboxes_list}"
+        )  # Log raw bboxes
+
         try:
             image = Image.open(image_path).convert("RGB")
         except FileNotFoundError as e:
@@ -303,6 +307,10 @@ class DroneObjectDetectionDataset(Dataset):
                 [normalized_x_min, normalized_y_min, normalized_x_max, normalized_y_max]
             )
             labels.append(int(class_index))
+
+        self.logger.debug(
+            f"  Normalized bboxes (index {idx}): {normalized_bboxes}"
+        )  # Log normalized bboxes
 
         image = transforms.Resize(self.image_size)(image)
         # Apply augmentations (supporting both a single augmentation and a list of augmentations)

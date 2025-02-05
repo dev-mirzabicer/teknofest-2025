@@ -1,7 +1,7 @@
 import logging
 
 
-def get_logger(name: str = __name__, level: int = logging.INFO) -> logging.Logger:
+def get_logger(name: str = __name__, level: int = logging.DEBUG) -> logging.Logger:
     """
     Returns a configured logger with the specified name and level.
 

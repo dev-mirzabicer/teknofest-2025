@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.losses.base_loss import BaseLoss
+from utils.logger import get_logger
 
 
 class DetectionLoss(BaseLoss):
@@ -11,7 +12,7 @@ class DetectionLoss(BaseLoss):
       - Objectness (confidence) via BCE with logits, with separate weighting for object vs. no-object cells.
       - Classification via Cross Entropy loss.
 
-    Assumptions:
+    Format:
       - Model outputs:
           * bbox_preds: (B, G, G, 4) with [tx, ty, tw, th], where tx,ty ∈ [0,1] (after sigmoid) and tw,th > 0 (after exp).
           * objectness: (B, G, G, 1) raw logits.
@@ -26,7 +27,7 @@ class DetectionLoss(BaseLoss):
         super().__init__(config)
         # Get grid size from config (should match model config)
         self.grid_size = config.get("grid_size", 7)
-        # Loss weights (you can adjust these via your config)
+        # Loss weights
         self.bbox_loss_weight = config.get("bbox_loss_weight", 5.0)
         self.obj_loss_weight = config.get("obj_loss_weight", 1.0)
         self.noobj_loss_weight = config.get("noobj_loss_weight", 0.5)
@@ -51,10 +52,22 @@ class DetectionLoss(BaseLoss):
         Returns:
           torch.Tensor: The total scalar loss.
         """
+        logger = get_logger(self.__class__.__name__)  # Get logger instance
         # Unpack model outputs
         bbox_preds = model_output["bbox_preds"]  # (B, G, G, 4)
         obj_preds = model_output["objectness"]  # (B, G, G, 1), raw logits
         class_logits = model_output["logits"]  # (B, G, G, num_classes)
+        targets_list = batch["targets"]
+
+        logger.info("DetectionLoss forward pass started.")  # Log start of forward pass
+        logger.debug(f"  bbox_preds shape: {bbox_preds.shape}")  # Log bbox_preds shape
+        logger.debug(f"  obj_preds shape: {obj_preds.shape}")  # Log obj_preds shape
+        logger.debug(
+            f"  class_logits shape: {class_logits.shape}"
+        )  # Log class_logits shape
+        logger.debug(
+            f"  Ground truth targets (first in batch): {targets_list[0]['boxes'] if targets_list else 'No targets'}"
+        )  # Log GT boxes
 
         B, G, _, _ = bbox_preds.shape
         device = bbox_preds.device
@@ -69,7 +82,6 @@ class DetectionLoss(BaseLoss):
 
         # Process each image in the batch.
         # Note: batch["targets"] is expected to be a list (length B) of dicts.
-        targets_list = batch["targets"]
         for b in range(B):
             target_dict = targets_list[b]
             # "boxes": (N, 4) with [x_min, y_min, x_max, y_max] (normalized coordinates)
@@ -105,6 +117,18 @@ class DetectionLoss(BaseLoss):
             # Form the target bounding-box parameters: [tx, ty, tw, th]
             target_boxes = torch.cat([offsets, wh], dim=1)  # (N, 4)
 
+            if b == 0 and boxes.numel() > 0:
+                logger.debug(f"  First GT box (image 0): {boxes[0]}")
+                logger.debug(f"  Center of first GT box: {centers[0]}")
+                logger.debug(
+                    f"  Cell cols/rows for first GT box: col={cell_cols[0]}, row={cell_rows[0]}"
+                )
+                logger.debug(f"  Offsets (tx, ty) for first GT box: {offsets[0]}")
+                logger.debug(f"  WH (tw, th) for first GT box: {wh[0]}")
+                logger.debug(
+                    f"  Target boxes [tx, ty, tw, th] for first GT box: {target_boxes[0]}"
+                )
+
             # Assign each ground-truth box to its corresponding grid cell.
             for n in range(boxes.shape[0]):
                 r = cell_rows[n]  # row index (from y)
@@ -113,6 +137,16 @@ class DetectionLoss(BaseLoss):
                 target_objectness[b, r, c, 0] = 1.0
                 target_bbox[b, r, c, :] = target_boxes[n]
                 target_class[b, r, c] = labels[n]
+
+        logger.debug(
+            f"  target_objectness shape: {target_objectness.shape}, sample (first cell): {target_objectness[0,0,0]}"
+        )  # Log target_objectness
+        logger.debug(
+            f"  target_bbox shape: {target_bbox.shape}, sample (first cell): {target_bbox[0,0,0]}"
+        )  # Log target_bbox
+        logger.debug(
+            f"  target_class shape: {target_class.shape}, sample (first cell): {target_class[0,0]}"
+        )  # Log target_class
 
         # Create a mask of grid cells with objects.
         obj_mask = target_objectness.squeeze(-1) == 1  # (B, G, G)
@@ -156,6 +190,12 @@ class DetectionLoss(BaseLoss):
             + obj_loss
             + self.class_loss_weight * class_loss
         )
+
+        logger.debug(f"  Localization Loss: {loc_loss.item():.4f}")  # Log loc_loss
+        logger.debug(f"  Objectness Loss: {obj_loss.item():.4f}")  # Log obj_loss
+        logger.debug(f"  Classification Loss: {class_loss:.4f}")  # Log class_loss
+        logger.info(f"  Total Loss: {total_loss.item():.4f}")  # Log total_loss
+
         return total_loss
 
     @classmethod

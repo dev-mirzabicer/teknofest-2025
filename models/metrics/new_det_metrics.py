@@ -1,5 +1,6 @@
 import torch
 from models.metrics.base_metric import BaseMetric
+from utils.logger import get_logger
 
 
 def compute_iou(box1: torch.Tensor, box2: torch.Tensor) -> float:
@@ -14,7 +15,7 @@ def compute_iou(box1: torch.Tensor, box2: torch.Tensor) -> float:
 
     inter_area = max(0, x2 - x1) * max(0, y2 - y1)
     area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-    area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    area2 = (box2[2] - box2[0]) * (box2[3] - box1[1])
     union_area = area1 + area2 - inter_area
     if union_area == 0:
         return 0.0
@@ -39,14 +40,8 @@ class DetectionIoUMetric(BaseMetric):
         self.count = 0
 
     def update(self, model_output: dict, batch: dict) -> None:
-        """
-        For each image in the batch, assign each ground truth to its grid cell,
-        decode the predicted box from that cell, and compute IoU.
+        logger = get_logger(self.__class__.__name__)  # Get logger instance
 
-        Args:
-            model_output: Dict with keys "bbox_preds", "objectness", "logits"
-            batch: Dict with key "targets" (a list of dicts with "boxes" and "labels")
-        """
         bbox_preds = model_output["bbox_preds"]  # (B, G, G, 4)
         objectness = model_output[
             "objectness"
@@ -55,10 +50,10 @@ class DetectionIoUMetric(BaseMetric):
         device = bbox_preds.device
         cell_size = 1.0 / self.grid_size
 
-        # Prepare grid centers (same as used in trainer visualization)
-        xs = (torch.arange(G, device=device).float() + 0.5) * cell_size
-        ys = (torch.arange(G, device=device).float() + 0.5) * cell_size
-        grid_x, grid_y = torch.meshgrid(xs, ys, indexing="ij")  # (G, G)
+        # Prepare grid top-left corners instead of centers
+        xs = (torch.arange(G, device=device).float()) * cell_size  # removed + 0.5
+        ys = (torch.arange(G, device=device).float()) * cell_size  # removed + 0.5
+        grid_x, grid_y = torch.meshgrid(xs, ys, indexing="xy")  # (G, G)
         grid_x = grid_x.unsqueeze(0).unsqueeze(-1)  # (1, G, G, 1)
         grid_y = grid_y.unsqueeze(0).unsqueeze(-1)  # (1, G, G, 1)
 
@@ -88,6 +83,14 @@ class DetectionIoUMetric(BaseMetric):
                 r = cell_rows[n].item()
                 # Predicted parameters at grid cell (r, c)
                 pred_params = preds[r, c]  # (4,) -> [tx, ty, tw, th]
+
+                # Log grid_x[0, r, c, 0].item() and grid_y[0, r, c, 0].item()
+                grid_x_val = grid_x[0, r, c, 0].item()
+                grid_y_val = grid_y[0, r, c, 0].item()
+                logger.debug(
+                    f"  Grid cell (r={r}, c={c}) top-left corner x: {grid_x_val:.4f}, y: {grid_y_val:.4f}"
+                )
+
                 # Decode the center offset:
                 # The network predicts offsets (tx, ty) ∈ [0,1] (after sigmoid in model) so:
                 pred_center_x = grid_x[0, r, c, 0] + pred_params[0] * cell_size
@@ -112,6 +115,21 @@ class DetectionIoUMetric(BaseMetric):
                 gt_box = boxes[n]  # Already in normalized coordinates
 
                 iou = compute_iou(pred_box, gt_box)
+
+                # Log detailed info for the first GT box in the first image (keep as is)
+                if b == 0 and n == 0:
+                    logger.debug(f"  First GT box: {gt_box}")
+                    logger.debug(f"  Cell cols/rows for first GT box: col={c}, row={r}")
+                    logger.debug(f"  Predicted params [tx, ty, tw, th]: {pred_params}")
+                    logger.debug(
+                        f"  Decoded pred_center_x, pred_center_y: ({pred_center_x.item():.4f}, {pred_center_y.item():.4f})"
+                    )
+                    logger.debug(
+                        f"  Decoded pred_w, pred_h: ({pred_w.item():.4f}, {pred_h.item():.4f})"
+                    )
+                    logger.debug(f"  Decoded pred_box: {pred_box}")
+                    logger.debug(f"  Calculated IoU: {iou:.4f}")
+
                 self.total_iou += iou
                 self.count += 1
 

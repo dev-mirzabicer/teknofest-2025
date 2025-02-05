@@ -3,6 +3,7 @@ import torch.nn as nn
 from models.base_model import BaseModel
 from typing import Dict, Any
 from utils.validators import check_tensor_shape, check_type
+from utils.logger import get_logger
 
 
 class SimpleObjectDetector(BaseModel):
@@ -51,9 +52,14 @@ class SimpleObjectDetector(BaseModel):
         self.class_head = nn.Conv2d(128, num_classes, kernel_size=1)
 
     def forward(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        logger = get_logger(self.__class__.__name__)  # Get logger instance
         images = batch.get("images")
         if images is None:
             raise ValueError("Input batch must contain key 'images'")
+
+        logger.info(
+            f"Forward pass - Input image shape: {images.shape}"
+        )  # Log input image shape
 
         # Type checking
         check_type(images, torch.Tensor, "images")
@@ -65,6 +71,14 @@ class SimpleObjectDetector(BaseModel):
         # Separate bbox predictions and objectness.
         bbox_preds = bbox_out[:, :4, :, :]  # (B, 4, grid_size, grid_size)
         objectness = bbox_out[:, 4:5, :, :]  # (B, 1, grid_size, grid_size)
+        logits = class_out[:, :, :, :]  # (B, num_classes, grid_size, grid_size)
+        logger.debug(
+            f"  Raw bbox_preds shape: {bbox_preds.shape}"
+        )  # Log raw bbox_preds shape
+        logger.debug(
+            f"  Raw objectness shape: {objectness.shape}"
+        )  # Log raw objectness shape
+        logger.debug(f"  Raw logits shape: {logits.shape}")  # Log raw logits shape
 
         # Sigmoid for offsets (center_x, center_y)
         bbox_preds[:, :2, :, :] = torch.sigmoid(bbox_preds[:, :2, :, :])
@@ -75,6 +89,16 @@ class SimpleObjectDetector(BaseModel):
         bbox_preds = bbox_preds.permute(0, 2, 3, 1).contiguous()
         objectness = objectness.permute(0, 2, 3, 1).contiguous()
         logits = class_out.permute(0, 2, 3, 1).contiguous()
+
+        logger.debug(
+            f"  Processed bbox_preds shape (after sigmoid/exp and permute): {bbox_preds.shape}"
+        )  # Log processed bbox_preds shape
+        logger.debug(
+            f"  Processed objectness shape (after permute): {objectness.shape}"
+        )  # Log processed objectness shape
+        logger.debug(
+            f"  Processed logits shape (after permute): {logits.shape}"
+        )  # Log processed logits shape
 
         return {"bbox_preds": bbox_preds, "objectness": objectness, "logits": logits}
 
